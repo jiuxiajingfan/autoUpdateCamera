@@ -1,5 +1,8 @@
 # 使用 golang 官方镜像作为构建环境
-FROM golang:1.22-bullseye AS builder
+FROM golang:1.22-alpine AS builder
+
+# 安装构建依赖
+RUN apk add --no-cache gcc musl-dev
 
 # 设置工作目录
 WORKDIR /app
@@ -8,18 +11,13 @@ WORKDIR /app
 COPY . .
 
 # 构建应用
-RUN go build -o autoUpdateCam
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o autoUpdateCam
 
-# 使用 debian 作为运行环境
-FROM debian:bullseye-slim
+# 使用 alpine 作为运行环境
+FROM alpine:3.19
 
 # 安装 FFmpeg 和其他必要的包
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ffmpeg \
-    ca-certificates \
-    tzdata && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ffmpeg ca-certificates
 
 # 设置工作目录
 WORKDIR /app
@@ -27,11 +25,8 @@ WORKDIR /app
 # 从构建阶段复制二进制文件
 COPY --from=builder /app/autoUpdateCam .
 
-# 创建配置文件目录和录制目录
-RUN mkdir -p /app/recordings /app/data
-
-# 复制配置文件
-COPY config.json .
+# 创建录制目录
+RUN mkdir -p /app/recordings
 
 # 声明所有环境变量
 ENV TZ=Asia/Shanghai \
@@ -58,32 +53,34 @@ ENV TZ=Asia/Shanghai \
     UPLOAD_MAX_CONCURRENT=3
 
 # 设置时区
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+RUN cp /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone
 
 # 创建启动脚本
-RUN echo '#!/bin/sh\n\
-./autoUpdateCam \
-  --camera-ip "$CAMERA_IP" \
-  --camera-port "$CAMERA_PORT" \
-  --camera-username "$CAMERA_USERNAME" \
-  --camera-password "$CAMERA_PASSWORD" \
-  --camera-stream "$CAMERA_STREAM" \
-  --recording-output-dir "$RECORDING_OUTPUT_DIR" \
-  --recording-segment-time "$RECORDING_SEGMENT_TIME" \
-  --recording-start-hour "$RECORDING_START_HOUR" \
-  --recording-start-minute "$RECORDING_START_MINUTE" \
-  --recording-end-hour "$RECORDING_END_HOUR" \
-  --recording-end-minute "$RECORDING_END_MINUTE" \
-  --upload-retry-count "$UPLOAD_RETRY_COUNT" \
-  --upload-retry-delay "$UPLOAD_RETRY_DELAY" \
-  --upload-keep-local "$UPLOAD_KEEP_LOCAL" \
-  --upload-file-pattern "$UPLOAD_FILE_PATTERN" \
-  --upload-max-file-age "$UPLOAD_MAX_FILE_AGE" \
-  --upload-alist-url "$UPLOAD_ALIST_URL" \
-  --upload-alist-user "$UPLOAD_ALIST_USER" \
-  --upload-alist-pass "$UPLOAD_ALIST_PASS" \
-  --upload-alist-path "$UPLOAD_ALIST_PATH"' > /app/start.sh && \
+RUN printf '#!/bin/sh\n\
+./autoUpdateCam \\\n\
+  --camera-ip "$CAMERA_IP" \\\n\
+  --camera-port "$CAMERA_PORT" \\\n\
+  --camera-username "$CAMERA_USERNAME" \\\n\
+  --camera-password "$CAMERA_PASSWORD" \\\n\
+  --camera-stream "$CAMERA_STREAM" \\\n\
+  --recording-output-dir "$RECORDING_OUTPUT_DIR" \\\n\
+  --recording-segment-time "$RECORDING_SEGMENT_TIME" \\\n\
+  --recording-start-hour "$RECORDING_START_HOUR" \\\n\
+  --recording-start-minute "$RECORDING_START_MINUTE" \\\n\
+  --recording-end-hour "$RECORDING_END_HOUR" \\\n\
+  --recording-end-minute "$RECORDING_END_MINUTE" \\\n\
+  --upload-retry-count "$UPLOAD_RETRY_COUNT" \\\n\
+  --upload-retry-delay "$UPLOAD_RETRY_DELAY" \\\n\
+  --upload-keep-local "$UPLOAD_KEEP_LOCAL" \\\n\
+  --upload-file-pattern "$UPLOAD_FILE_PATTERN" \\\n\
+  --upload-max-file-age "$UPLOAD_MAX_FILE_AGE" \\\n\
+  --upload-alist-url "$UPLOAD_ALIST_URL" \\\n\
+  --upload-alist-user "$UPLOAD_ALIST_USER" \\\n\
+  --upload-alist-pass "$UPLOAD_ALIST_PASS" \\\n\
+  --upload-alist-path "$UPLOAD_ALIST_PATH" \\\n\
+  --upload-max-concurrent "$UPLOAD_MAX_CONCURRENT"\n' > /app/start.sh && \
     chmod +x /app/start.sh
 
 # 设置启动命令
-CMD ["/app/start.sh"] 
+CMD ["/bin/sh", "/app/start.sh"]
