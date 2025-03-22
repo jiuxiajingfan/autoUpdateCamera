@@ -1,0 +1,17 @@
+{
+    "camera": {
+        "ip": "192.168.5.5",
+        "port": "554",
+        "username": "admin",
+        "password": "password",
+        "stream": "stream1"
+    },
+    "recording": {
+        "output_dir": "recordings",
+        "segment_time": 10,
+        "start_hour": 12,
+        "start_minute": 16,
+        "end_hour": 12,
+        "end_minute": 20
+    }
+} 
