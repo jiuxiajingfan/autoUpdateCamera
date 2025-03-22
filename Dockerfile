@@ -14,10 +14,12 @@ RUN go build -o autoUpdateCam
 FROM debian:bullseye-slim
 
 # 安装 FFmpeg 和其他必要的包
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+    tzdata && \
+    rm -rf /var/lib/apt/lists/*
 
 # 设置工作目录
 WORKDIR /app
@@ -33,26 +35,27 @@ COPY config.json .
 
 # 声明所有环境变量
 ENV TZ=Asia/Shanghai \
-    CAMERA_IP="" \
-    CAMERA_PORT="" \
-    CAMERA_USERNAME="" \
-    CAMERA_PASSWORD="" \
+    CAMERA_IP=192.168.1.100 \
+    CAMERA_PORT=554 \
+    CAMERA_USERNAME=admin \
+    CAMERA_PASSWORD=password \
     CAMERA_STREAM="" \
     RECORDING_OUTPUT_DIR="/app/recordings" \
-    RECORDING_SEGMENT_TIME="" \
-    RECORDING_START_HOUR="" \
-    RECORDING_START_MINUTE="" \
-    RECORDING_END_HOUR="" \
-    RECORDING_END_MINUTE="" \
-    UPLOAD_RETRY_COUNT="" \
-    UPLOAD_RETRY_DELAY="" \
-    UPLOAD_KEEP_LOCAL="" \
-    UPLOAD_FILE_PATTERN="" \
-    UPLOAD_MAX_FILE_AGE="" \
-    UPLOAD_ALIST_URL="" \
-    UPLOAD_ALIST_USER="" \
-    UPLOAD_ALIST_PASS="" \
-    UPLOAD_ALIST_PATH=""
+    RECORDING_SEGMENT_TIME=300 \
+    RECORDING_START_HOUR=8 \
+    RECORDING_START_MINUTE=0 \
+    RECORDING_END_HOUR=18 \
+    RECORDING_END_MINUTE=0 \
+    UPLOAD_RETRY_COUNT=3 \
+    UPLOAD_RETRY_DELAY=5 \
+    UPLOAD_KEEP_LOCAL=false \
+    UPLOAD_FILE_PATTERN=merged_*.mkv \
+    UPLOAD_MAX_FILE_AGE=30 \
+    UPLOAD_ALIST_URL=http://localhost:5244 \
+    UPLOAD_ALIST_USER=admin \
+    UPLOAD_ALIST_PASS=password \
+    UPLOAD_ALIST_PATH=/ \
+    UPLOAD_MAX_CONCURRENT=3
 
 # 设置时区
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
