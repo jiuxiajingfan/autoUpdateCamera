@@ -52,17 +52,156 @@ type Recorder struct {
 }
 
 func loadConfig() (*Config, error) {
-	file, err := os.ReadFile("config.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read config file: %v", err)
+	config := &Config{}
+
+	// 从环境变量加载摄像头配置
+	config.Camera.IP = getEnvOrDefault("CAMERA_IP", "192.168.1.100")
+	config.Camera.Port = getEnvOrDefault("CAMERA_PORT", "554")
+	config.Camera.Username = getEnvOrDefault("CAMERA_USERNAME", "admin")
+	config.Camera.Password = getEnvOrDefault("CAMERA_PASSWORD", "password")
+	config.Camera.Stream = getEnvOrDefault("CAMERA_STREAM", "/cam/realmonitor?channel=1&subtype=0")
+
+	// 从环境变量加载录制配置
+	config.Recording.OutputDir = getEnvOrDefault("RECORDING_OUTPUT_DIR", "recordings")
+	config.Recording.SegmentTime = getEnvIntOrDefault("RECORDING_SEGMENT_TIME", 300)
+	config.Recording.StartHour = getEnvIntOrDefault("RECORDING_START_HOUR", 8)
+	config.Recording.StartMinute = getEnvIntOrDefault("RECORDING_START_MINUTE", 0)
+	config.Recording.EndHour = getEnvIntOrDefault("RECORDING_END_HOUR", 18)
+	config.Recording.EndMinute = getEnvIntOrDefault("RECORDING_END_MINUTE", 0)
+
+	// 从环境变量加载上传配置
+	config.Upload.RetryCount = getEnvIntOrDefault("UPLOAD_RETRY_COUNT", 3)
+	config.Upload.RetryDelay = getEnvIntOrDefault("UPLOAD_RETRY_DELAY", 5)
+	config.Upload.KeepLocal = getEnvBoolOrDefault("UPLOAD_KEEP_LOCAL", true)
+	config.Upload.FilePattern = getEnvOrDefault("UPLOAD_FILE_PATTERN", "merged_*.mkv")
+	config.Upload.MaxFileAge = getEnvIntOrDefault("UPLOAD_MAX_FILE_AGE", 30)
+	config.Upload.AlistURL = getEnvOrDefault("UPLOAD_ALIST_URL", "http://localhost:5244")
+	config.Upload.AlistUser = getEnvOrDefault("UPLOAD_ALIST_USER", "admin")
+	config.Upload.AlistPass = getEnvOrDefault("UPLOAD_ALIST_PASS", "password")
+	config.Upload.AlistPath = getEnvOrDefault("UPLOAD_ALIST_PATH", "/")
+
+	// 打印实际使用的配置
+	log.Printf("Using configuration:")
+	log.Printf("Camera: IP=%s, Port=%s, Username=%s, Stream=%s",
+		config.Camera.IP, config.Camera.Port, config.Camera.Username, config.Camera.Stream)
+	log.Printf("Recording: OutputDir=%s, SegmentTime=%d, Start=%02d:%02d, End=%02d:%02d",
+		config.Recording.OutputDir, config.Recording.SegmentTime,
+		config.Recording.StartHour, config.Recording.StartMinute,
+		config.Recording.EndHour, config.Recording.EndMinute)
+	log.Printf("Upload: RetryCount=%d, RetryDelay=%d, KeepLocal=%v, FilePattern=%s, MaxFileAge=%d",
+		config.Upload.RetryCount, config.Upload.RetryDelay, config.Upload.KeepLocal,
+		config.Upload.FilePattern, config.Upload.MaxFileAge)
+	log.Printf("Alist: URL=%s, User=%s, Path=%s",
+		config.Upload.AlistURL, config.Upload.AlistUser, config.Upload.AlistPath)
+
+	// 尝试从文件加载配置（如果存在）
+	if _, err := os.Stat("config.json"); err == nil {
+		file, err := os.ReadFile("config.json")
+		if err == nil {
+			// 解析 JSON 配置
+			var fileConfig Config
+			if err := json.Unmarshal(file, &fileConfig); err == nil {
+				// 使用文件配置覆盖默认值和环境变量（如果文件中有相应配置）
+				mergeConfig(config, &fileConfig)
+			}
+		}
 	}
 
-	var config Config
-	if err := json.Unmarshal(file, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %v", err)
+	return config, nil
+}
+
+// 从环境变量获取字符串值，如果不存在则返回默认值
+func getEnvOrDefault(key, defaultValue string) string {
+	if value, exists := os.LookupEnv(key); exists {
+		return value
+	}
+	return defaultValue
+}
+
+// 从环境变量获取整数值，如果不存在或无效则返回默认值
+func getEnvIntOrDefault(key string, defaultValue int) int {
+	if value, exists := os.LookupEnv(key); exists {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
+}
+
+// 从环境变量获取布尔值，如果不存在或无效则返回默认值
+func getEnvBoolOrDefault(key string, defaultValue bool) bool {
+	if value, exists := os.LookupEnv(key); exists {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
+		}
+	}
+	return defaultValue
+}
+
+// 合并配置，用源配置中的非零值覆盖目标配置
+func mergeConfig(dst, src *Config) {
+	// 合并摄像头配置
+	if src.Camera.IP != "" {
+		dst.Camera.IP = src.Camera.IP
+	}
+	if src.Camera.Port != "" {
+		dst.Camera.Port = src.Camera.Port
+	}
+	if src.Camera.Username != "" {
+		dst.Camera.Username = src.Camera.Username
+	}
+	if src.Camera.Password != "" {
+		dst.Camera.Password = src.Camera.Password
+	}
+	if src.Camera.Stream != "" {
+		dst.Camera.Stream = src.Camera.Stream
 	}
 
-	return &config, nil
+	// 合并录制配置
+	if src.Recording.OutputDir != "" {
+		dst.Recording.OutputDir = src.Recording.OutputDir
+	}
+	if src.Recording.SegmentTime != 0 {
+		dst.Recording.SegmentTime = src.Recording.SegmentTime
+	}
+	if src.Recording.StartHour != 0 {
+		dst.Recording.StartHour = src.Recording.StartHour
+	}
+	if src.Recording.StartMinute != 0 {
+		dst.Recording.StartMinute = src.Recording.StartMinute
+	}
+	if src.Recording.EndHour != 0 {
+		dst.Recording.EndHour = src.Recording.EndHour
+	}
+	if src.Recording.EndMinute != 0 {
+		dst.Recording.EndMinute = src.Recording.EndMinute
+	}
+
+	// 合并上传配置
+	if src.Upload.RetryCount != 0 {
+		dst.Upload.RetryCount = src.Upload.RetryCount
+	}
+	if src.Upload.RetryDelay != 0 {
+		dst.Upload.RetryDelay = src.Upload.RetryDelay
+	}
+	if src.Upload.FilePattern != "" {
+		dst.Upload.FilePattern = src.Upload.FilePattern
+	}
+	if src.Upload.MaxFileAge != 0 {
+		dst.Upload.MaxFileAge = src.Upload.MaxFileAge
+	}
+	if src.Upload.AlistURL != "" {
+		dst.Upload.AlistURL = src.Upload.AlistURL
+	}
+	if src.Upload.AlistUser != "" {
+		dst.Upload.AlistUser = src.Upload.AlistUser
+	}
+	if src.Upload.AlistPass != "" {
+		dst.Upload.AlistPass = src.Upload.AlistPass
+	}
+	if src.Upload.AlistPath != "" {
+		dst.Upload.AlistPath = src.Upload.AlistPath
+	}
 }
 
 func NewRecorder(config *Config, startTime, endTime time.Time) *Recorder {
