@@ -1,17 +1,28 @@
 {
     "camera": {
-        "ip": "192.168.5.5",
+        "ip": "192.168.101.103",
         "port": "554",
         "username": "admin",
         "password": "password",
-        "stream": "stream1"
+        "stream": "/cam/realmonitor?channel=1&subtype=0"
     },
     "recording": {
         "output_dir": "recordings",
         "segment_time": 10,
-        "start_hour": 12,
-        "start_minute": 16,
-        "end_hour": 12,
-        "end_minute": 20
+        "start_hour": 16,
+        "start_minute": 0,
+        "end_hour": 16,
+        "end_minute": 22
+    },
+    "upload": {
+        "retry_count": 3,
+        "retry_delay": 5,
+        "keep_local": true,
+        "file_pattern": "merged_*.mkv",
+        "max_file_age": 30,
+        "alist_url": "http://192.168.101.2:5244",
+        "alist_user": "admin",
+        "alist_pass": "123456",
+        "alist_path": "/path/to/upload"
     }
 } 
