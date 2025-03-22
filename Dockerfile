@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o 
 FROM alpine:3.19
 
 # 安装 FFmpeg 和其他必要的包
-RUN apk add --no-cache ffmpeg ca-certificates
+RUN apk add --no-cache ffmpeg ca-certificates tzdata
 
 # 设置工作目录
 WORKDIR /app
@@ -53,7 +53,7 @@ ENV TZ=Asia/Shanghai \
     UPLOAD_MAX_CONCURRENT=3
 
 # 设置时区
-RUN cp /usr/share/zoneinfo/$TZ /etc/localtime && \
+RUN ln -sf /usr/share/zoneinfo/$TZ /etc/localtime && \
     echo $TZ > /etc/timezone
 
 # 创建启动脚本
