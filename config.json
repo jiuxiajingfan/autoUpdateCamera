@@ -8,21 +8,22 @@
     },
     "recording": {
         "output_dir": "recordings",
-        "segment_time": 10,
+        "segment_time": 30,
         "start_hour": 16,
         "start_minute": 0,
-        "end_hour": 16,
-        "end_minute": 22
+        "end_hour": 18,
+        "end_minute": 34
     },
     "upload": {
         "retry_count": 3,
         "retry_delay": 5,
-        "keep_local": true,
-        "file_pattern": "merged_*.mkv",
-        "max_file_age": 30,
+        "keep_local": false,
+        "file_pattern": "segment_*.mkv",
+        "max_file_age": 1,
         "alist_url": "http://192.168.101.2:5244",
         "alist_user": "admin",
-        "alist_pass": "123456",
-        "alist_path": "/path/to/upload"
+        "alist_pass": "password",
+        "alist_path": "/path/upload",
+        "max_concurrent": 3
     }
 } 

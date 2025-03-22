@@ -34,6 +34,19 @@ type Config struct {
 	Upload UploadConfig `json:"upload"`
 }
 
+type UploadConfig struct {
+	RetryCount    int    `json:"retry_count"`
+	RetryDelay    int    `json:"retry_delay"`
+	KeepLocal     bool   `json:"keep_local"`
+	FilePattern   string `json:"file_pattern"`
+	MaxFileAge    int    `json:"max_file_age"`
+	AlistURL      string `json:"alist_url"`
+	AlistUser     string `json:"alist_user"`
+	AlistPass     string `json:"alist_pass"`
+	AlistPath     string `json:"alist_path"`
+	MaxConcurrent int    `json:"max_concurrent"`
+}
+
 type Recorder struct {
 	rtspURL     string
 	outputDir   string
@@ -79,6 +92,7 @@ func loadConfig() (*Config, error) {
 	config.Upload.AlistUser = getEnvOrDefault("UPLOAD_ALIST_USER", "admin")
 	config.Upload.AlistPass = getEnvOrDefault("UPLOAD_ALIST_PASS", "password")
 	config.Upload.AlistPath = getEnvOrDefault("UPLOAD_ALIST_PATH", "/")
+	config.Upload.MaxConcurrent = getEnvIntOrDefault("UPLOAD_MAX_CONCURRENT", 3)
 
 	// 打印实际使用的配置
 	log.Printf("Using configuration:")
@@ -201,6 +215,9 @@ func mergeConfig(dst, src *Config) {
 	}
 	if src.Upload.AlistPath != "" {
 		dst.Upload.AlistPath = src.Upload.AlistPath
+	}
+	if src.Upload.MaxConcurrent != 0 {
+		dst.Upload.MaxConcurrent = src.Upload.MaxConcurrent
 	}
 }
 
@@ -590,24 +607,155 @@ func (r *Recorder) Stop() {
 	}
 	time.Sleep(5 * time.Second)
 
-	// 在这里进行一次性合并
-	if err, mergedFile := r.mergeSegments(); err != nil {
-		fmt.Printf("Warning: failed to merge segments: %v\n", err)
-	} else if mergedFile != "" {
-		// 合并成功后执行上传
-		fmt.Printf("Starting to upload merged file: %s\n", mergedFile)
-		destPath := filepath.Base(mergedFile) // 使用文件名作为目标路径
-		if response, err := r.uploader.UploadFile(mergedFile, destPath); err != nil {
-			log.Printf("Warning: failed to upload merged file: %v", err)
-		} else {
-			// 打印上传响应的JSON
-			responseJSON, _ := json.MarshalIndent(response, "", "  ")
-			fmt.Printf("Upload response: %s\n", string(responseJSON))
-			fmt.Printf("Successfully uploaded file: %s\n", mergedFile)
+	// 在新的 goroutine 中处理上传
+	go func() {
+		// 获取录制目录的绝对路径
+		absOutputDir, err := filepath.Abs(r.outputDir)
+		if err != nil {
+			fmt.Printf("Error getting absolute path: %v\n", err)
+			return
 		}
-	}
 
-	// 最后再设置状态为 false
+		// 获取所有分段文件
+		files, err := os.ReadDir(absOutputDir)
+		if err != nil {
+			fmt.Printf("Error reading directory: %v\n", err)
+			return
+		}
+
+		var validSegments []string
+		for _, file := range files {
+			if strings.HasPrefix(file.Name(), "segment_") && strings.HasSuffix(file.Name(), ".mkv") {
+				filePath := filepath.Join(absOutputDir, file.Name())
+				info, err := os.Stat(filePath)
+				if err != nil || info.Size() < 1024 {
+					// 删除无效的分片文件
+					if err := os.Remove(filePath); err != nil {
+						log.Printf("Warning: failed to remove invalid segment file %s: %v", filePath, err)
+					}
+					continue
+				}
+				validSegments = append(validSegments, file.Name())
+			}
+		}
+
+		// 按文件名排序
+		sort.Slice(validSegments, func(i, j int) bool {
+			numI := strings.TrimPrefix(strings.TrimSuffix(validSegments[i], ".mkv"), "segment_")
+			numJ := strings.TrimPrefix(strings.TrimSuffix(validSegments[j], ".mkv"), "segment_")
+			iNum, _ := strconv.Atoi(numI)
+			jNum, _ := strconv.Atoi(numJ)
+			return iNum < jNum
+		})
+
+		fmt.Printf("Found %d valid segments to upload\n", len(validSegments))
+
+		if len(validSegments) == 0 {
+			fmt.Println("No valid segments to upload")
+			return
+		}
+
+		// 创建任务通道和等待组
+		tasks := make(chan string, len(validSegments))
+		var wg sync.WaitGroup
+
+		// 创建上传状态管理
+		type uploadStatus struct {
+			sync.Mutex
+			inProgress map[string]bool
+			completed  map[string]bool
+		}
+		status := &uploadStatus{
+			inProgress: make(map[string]bool),
+			completed:  make(map[string]bool),
+		}
+
+		// 启动工作协程
+		maxWorkers := r.uploader.config.MaxConcurrent
+		if maxWorkers <= 0 {
+			maxWorkers = 3 // 默认值
+		}
+		dateStr := time.Now().Format("20060102")
+
+		fmt.Printf("Starting %d upload workers\n", maxWorkers)
+
+		// 创建工作协程
+		for i := 0; i < maxWorkers; i++ {
+			wg.Add(1)
+			go func(workerID int) {
+				defer wg.Done()
+				for segment := range tasks {
+					// 检查文件是否已经在上传或已完成
+					status.Lock()
+					if status.inProgress[segment] || status.completed[segment] {
+						status.Unlock()
+						continue
+					}
+					status.inProgress[segment] = true
+					status.Unlock()
+
+					segmentPath := filepath.Join(absOutputDir, segment)
+					destPath := filepath.Join(r.uploader.config.AlistPath, dateStr, segment)
+
+					fmt.Printf("[Worker %d] Uploading segment: %s to %s\n", workerID, segment, destPath)
+
+					// 尝试上传文件
+					var uploadErr error
+					var uploadSuccess bool
+					for i := 0; i < r.uploader.config.RetryCount; i++ {
+						if response, err := r.uploader.UploadFile(segmentPath, destPath); err != nil {
+							uploadErr = err
+							log.Printf("[Worker %d] Upload attempt %d/%d failed for %s: %v",
+								workerID, i+1, r.uploader.config.RetryCount, segment, err)
+							time.Sleep(time.Duration(r.uploader.config.RetryDelay) * time.Second)
+							continue
+						} else {
+							responseJSON, _ := json.MarshalIndent(response, "", "  ")
+							fmt.Printf("[Worker %d] Upload response for %s: %s\n", workerID, segment, string(responseJSON))
+							uploadErr = nil
+							uploadSuccess = true
+							break
+						}
+					}
+
+					// 更新上传状态
+					status.Lock()
+					delete(status.inProgress, segment)
+					if uploadSuccess {
+						status.completed[segment] = true
+					}
+					status.Unlock()
+
+					if uploadErr != nil {
+						log.Printf("[Worker %d] Failed to upload segment %s after %d attempts: %v",
+							workerID, segment, r.uploader.config.RetryCount, uploadErr)
+					}
+				}
+				fmt.Printf("[Worker %d] Finished processing all assigned segments\n", workerID)
+			}(i)
+		}
+
+		// 发送任务到通道
+		fmt.Printf("Queueing %d segments for upload\n", len(validSegments))
+		for _, segment := range validSegments {
+			tasks <- segment
+		}
+		close(tasks)
+
+		// 等待所有上传完成
+		fmt.Println("Waiting for all uploads to complete...")
+		wg.Wait()
+
+		// 打印上传统计
+		status.Lock()
+		fmt.Printf("Upload summary: %d/%d files successfully uploaded\n",
+			len(status.completed), len(validSegments))
+		status.Unlock()
+
+		fmt.Println("All uploads completed")
+	}()
+
+	// 立即设置状态为 false，不等待上传完成
 	r.mu.Lock()
 	r.isRecording = false
 	r.mu.Unlock()
@@ -638,9 +786,6 @@ func main() {
 	flag := false
 	for {
 		now := time.Now()
-		if !flag {
-			println("Waiting for recording period...")
-		}
 		if now.After(startTime) && now.Before(endTime) {
 			// 开始逻辑：如果未在录制，则开始录制
 			if !recorder.IsRecording() && !flag {

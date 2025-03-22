@@ -15,19 +15,6 @@ import (
 	"time"
 )
 
-// UploadConfig 上传配置
-type UploadConfig struct {
-	RetryCount  int    `json:"retry_count"`  // 重试次数
-	RetryDelay  int    `json:"retry_delay"`  // 重试延迟（秒）
-	KeepLocal   bool   `json:"keep_local"`   // 是否保留本地文件
-	FilePattern string `json:"file_pattern"` // 文件匹配模式
-	MaxFileAge  int    `json:"max_file_age"` // 文件最大保留天数
-	AlistURL    string `json:"alist_url"`    // Alist API地址
-	AlistUser   string `json:"alist_user"`   // Alist用户名
-	AlistPass   string `json:"alist_pass"`   // Alist密码
-	AlistPath   string `json:"alist_path"`   // Alist上传路径
-}
-
 // FileUploader 文件上传器
 type FileUploader struct {
 	config *UploadConfig
@@ -198,15 +185,6 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 	fileToUpload = zipFile
 	isCompressed = compressed
 
-	defer func() {
-		// 如果是压缩文件且需要保留原文件，则删除压缩文件
-		if isCompressed && u.config.KeepLocal {
-			if err := os.Remove(zipFile); err != nil {
-				log.Printf("Warning: failed to remove zip file: %v", err)
-			}
-		}
-	}()
-
 	// 如果没有token，先获取token
 	if u.token == "" {
 		if err := u.getAlistToken(); err != nil {
@@ -219,7 +197,6 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %v", err)
 	}
-	defer srcFile.Close()
 
 	// 创建multipart form
 	body := &bytes.Buffer{}
@@ -228,16 +205,22 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 	// 添加文件
 	part, err := writer.CreateFormFile("file", filepath.Base(fileToUpload))
 	if err != nil {
+		srcFile.Close()
 		return nil, fmt.Errorf("failed to create form file: %v", err)
 	}
 
 	if _, err := io.Copy(part, srcFile); err != nil {
+		srcFile.Close()
 		return nil, fmt.Errorf("failed to copy file content: %v", err)
 	}
 
+	// 关闭源文件
+	srcFile.Close()
+
 	// 添加路径参数，确保路径以斜杠开头
-	filePath := filepath.Join(u.config.AlistPath, filepath.Base(fileToUpload))
+	filePath := filepath.Join(u.config.AlistPath, time.Now().Format("20060102"), filepath.Base(fileToUpload))
 	filePath = "/" + strings.TrimPrefix(strings.ReplaceAll(filePath, "\\", "/"), "/")
+
 	// 将路径中的斜杠替换为 %2F
 	encodedPath := strings.ReplaceAll(filePath, "/", "%2F")
 
@@ -311,10 +294,29 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 		return nil, fmt.Errorf("upload failed: %v", result["message"])
 	}
 
-	// 如果不保留本地文件，则删除源文件
-	if !u.config.KeepLocal {
+	// 上传成功后，等待一小段时间确保文件句柄完全释放
+	time.Sleep(100 * time.Millisecond)
+
+	// 如果是压缩文件，删除压缩文件
+	if isCompressed {
+		if err := os.Remove(zipFile); err != nil {
+			log.Printf("Warning: failed to remove zip file: %v", err)
+		}
+	}
+
+	// 删除源文件
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
 		if err := os.Remove(srcPath); err != nil {
-			log.Printf("Warning: failed to remove source file: %v", err)
+			if i < maxRetries-1 {
+				log.Printf("Attempt %d: Failed to remove source file %s: %v, retrying...", i+1, srcPath, err)
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			log.Printf("Warning: failed to remove source file %s after %d attempts: %v", srcPath, maxRetries, err)
+		} else {
+			log.Printf("Successfully removed source file: %s", srcPath)
+			break
 		}
 	}
 
