@@ -174,17 +174,6 @@ func (u *FileUploader) compressToZip(inputFile string) (string, bool, error) {
 
 // UploadFile 上传单个文件到Alist
 func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interface{}, error) {
-	var fileToUpload string
-	var isCompressed bool
-
-	// 尝试压缩文件
-	zipFile, compressed, err := u.compressToZip(srcPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to compress file: %v", err)
-	}
-	fileToUpload = zipFile
-	isCompressed = compressed
-
 	// 如果没有token，先获取token
 	if u.token == "" {
 		if err := u.getAlistToken(); err != nil {
@@ -193,7 +182,7 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 	}
 
 	// 打开要上传的文件
-	srcFile, err := os.Open(fileToUpload)
+	srcFile, err := os.Open(srcPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file: %v", err)
 	}
@@ -203,7 +192,7 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 	writer := multipart.NewWriter(body)
 
 	// 添加文件
-	part, err := writer.CreateFormFile("file", filepath.Base(fileToUpload))
+	part, err := writer.CreateFormFile("file", filepath.Base(srcPath))
 	if err != nil {
 		srcFile.Close()
 		return nil, fmt.Errorf("failed to create form file: %v", err)
@@ -218,7 +207,7 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 	srcFile.Close()
 
 	// 添加路径参数，确保路径以斜杠开头
-	filePath := filepath.Join(u.config.AlistPath, time.Now().Format("20060102"), filepath.Base(fileToUpload))
+	filePath := filepath.Join(u.config.AlistPath, time.Now().Format("20060102"), filepath.Base(srcPath))
 	filePath = "/" + strings.TrimPrefix(strings.ReplaceAll(filePath, "\\", "/"), "/")
 
 	// 将路径中的斜杠替换为 %2F
@@ -296,13 +285,6 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 
 	// 上传成功后，等待一小段时间确保文件句柄完全释放
 	time.Sleep(100 * time.Millisecond)
-
-	// 如果是压缩文件，删除压缩文件
-	if isCompressed {
-		if err := os.Remove(zipFile); err != nil {
-			log.Printf("Warning: failed to remove zip file: %v", err)
-		}
-	}
 
 	// 删除源文件
 	maxRetries := 3
