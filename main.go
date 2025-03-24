@@ -607,6 +607,10 @@ func (r *Recorder) Stop() {
 	}
 	time.Sleep(5 * time.Second)
 
+	// 获取录制结束时的日期
+	recordingEndDate := time.Now().Format("20060102")
+	fmt.Printf("Recording ended at %s, using this date for all uploads\n", recordingEndDate)
+
 	// 在新的 goroutine 中处理上传
 	go func() {
 		// 获取录制目录的绝对路径
@@ -675,7 +679,6 @@ func (r *Recorder) Stop() {
 		if maxWorkers <= 0 {
 			maxWorkers = 3 // 默认值
 		}
-		dateStr := time.Now().Format("20060102")
 
 		fmt.Printf("Starting %d upload workers\n", maxWorkers)
 
@@ -695,7 +698,7 @@ func (r *Recorder) Stop() {
 					status.Unlock()
 
 					segmentPath := filepath.Join(absOutputDir, segment)
-					destPath := filepath.Join(r.uploader.config.AlistPath, dateStr, segment)
+					destPath := filepath.Join(r.uploader.config.AlistPath, recordingEndDate, segment)
 
 					fmt.Printf("[Worker %d] Uploading segment: %s to %s\n", workerID, segment, destPath)
 
