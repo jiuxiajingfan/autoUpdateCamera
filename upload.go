@@ -173,7 +173,7 @@ func (u *FileUploader) compressToZip(inputFile string) (string, bool, error) {
 }
 
 // UploadFile 上传单个文件到Alist
-func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interface{}, error) {
+func (u *FileUploader) UploadFile(srcPath, destPath string, date string) (map[string]interface{}, error) {
 	// 如果没有token，先获取token
 	if u.token == "" {
 		if err := u.getAlistToken(); err != nil {
@@ -207,7 +207,7 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 	srcFile.Close()
 
 	// 添加路径参数，确保路径以斜杠开头
-	filePath := filepath.Join(u.config.AlistPath, time.Now().Format("20060102"), filepath.Base(srcPath))
+	filePath := filepath.Join(u.config.AlistPath, date, filepath.Base(srcPath))
 	filePath = "/" + strings.TrimPrefix(strings.ReplaceAll(filePath, "\\", "/"), "/")
 
 	// 将路径中的斜杠替换为 %2F
@@ -278,7 +278,7 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 				return nil, fmt.Errorf("failed to refresh token: %v", err)
 			}
 			// 重试上传
-			return u.UploadFile(srcPath, destPath)
+			return u.UploadFile(srcPath, destPath, date)
 		}
 		return nil, fmt.Errorf("upload failed: %v", result["message"])
 	}
@@ -305,60 +305,60 @@ func (u *FileUploader) UploadFile(srcPath, destPath string) (map[string]interfac
 	return result, nil
 }
 
-// UploadMergedFiles 上传合并后的文件
-func (u *FileUploader) UploadMergedFiles(outputDir string) error {
-	// 获取所有合并后的文件
-	files, err := filepath.Glob(filepath.Join(outputDir, u.config.FilePattern))
-	if err != nil {
-		return fmt.Errorf("failed to list files: %v", err)
-	}
-
-	for _, file := range files {
-		// 检查文件年龄
-		fileInfo, err := os.Stat(file)
-		if err != nil {
-			log.Printf("Warning: failed to get file info for %s: %v", file, err)
-			continue
-		}
-
-		// 如果文件超过最大保留天数，则删除
-		if u.config.MaxFileAge > 0 {
-			age := time.Since(fileInfo.ModTime())
-			if age > time.Duration(u.config.MaxFileAge)*24*time.Hour {
-				if err := os.Remove(file); err != nil {
-					log.Printf("Warning: failed to remove old file %s: %v", file, err)
-				} else {
-					log.Printf("Removed old file: %s", file)
-				}
-				continue
-			}
-		}
-
-		// 构建目标路径
-		fileName := filepath.Base(file)
-		destPath := filepath.Join(u.config.AlistPath, fileName)
-
-		// 尝试上传文件，最多重试指定次数
-		var uploadErr error
-		for i := 0; i < u.config.RetryCount; i++ {
-			if _, err := u.UploadFile(file, destPath); err != nil {
-				uploadErr = err
-				log.Printf("Upload attempt %d/%d failed for %s: %v", i+1, u.config.RetryCount, file, err)
-				time.Sleep(time.Duration(u.config.RetryDelay) * time.Second)
-				continue
-			}
-			log.Printf("Successfully uploaded file to Alist: %s", file)
-			uploadErr = nil
-			break
-		}
-
-		if uploadErr != nil {
-			log.Printf("Failed to upload file %s after %d attempts: %v", file, u.config.RetryCount, uploadErr)
-		}
-	}
-
-	return nil
-}
+//// UploadMergedFiles 上传合并后的文件
+//func (u *FileUploader) UploadMergedFiles(outputDir string) error {
+//	// 获取所有合并后的文件
+//	files, err := filepath.Glob(filepath.Join(outputDir, u.config.FilePattern))
+//	if err != nil {
+//		return fmt.Errorf("failed to list files: %v", err)
+//	}
+//
+//	for _, file := range files {
+//		// 检查文件年龄
+//		fileInfo, err := os.Stat(file)
+//		if err != nil {
+//			log.Printf("Warning: failed to get file info for %s: %v", file, err)
+//			continue
+//		}
+//
+//		// 如果文件超过最大保留天数，则删除
+//		if u.config.MaxFileAge > 0 {
+//			age := time.Since(fileInfo.ModTime())
+//			if age > time.Duration(u.config.MaxFileAge)*24*time.Hour {
+//				if err := os.Remove(file); err != nil {
+//					log.Printf("Warning: failed to remove old file %s: %v", file, err)
+//				} else {
+//					log.Printf("Removed old file: %s", file)
+//				}
+//				continue
+//			}
+//		}
+//
+//		// 构建目标路径
+//		fileName := filepath.Base(file)
+//		destPath := filepath.Join(u.config.AlistPath, fileName)
+//
+//		// 尝试上传文件，最多重试指定次数
+//		var uploadErr error
+//		for i := 0; i < u.config.RetryCount; i++ {
+//			if _, err := u.UploadFile(file, destPath,); err != nil {
+//				uploadErr = err
+//				log.Printf("Upload attempt %d/%d failed for %s: %v", i+1, u.config.RetryCount, file, err)
+//				time.Sleep(time.Duration(u.config.RetryDelay) * time.Second)
+//				continue
+//			}
+//			log.Printf("Successfully uploaded file to Alist: %s", file)
+//			uploadErr = nil
+//			break
+//		}
+//
+//		if uploadErr != nil {
+//			log.Printf("Failed to upload file %s after %d attempts: %v", file, u.config.RetryCount, uploadErr)
+//		}
+//	}
+//
+//	return nil
+//}
 
 // CleanupOldFiles 清理旧文件
 func (u *FileUploader) CleanupOldFiles(outputDir string) error {

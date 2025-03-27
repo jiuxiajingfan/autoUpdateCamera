@@ -706,7 +706,7 @@ func (r *Recorder) Stop() {
 					var uploadErr error
 					var uploadSuccess bool
 					for i := 0; i < r.uploader.config.RetryCount; i++ {
-						if response, err := r.uploader.UploadFile(segmentPath, destPath); err != nil {
+						if response, err := r.uploader.UploadFile(segmentPath, destPath, recordingEndDate); err != nil {
 							uploadErr = err
 							log.Printf("[Worker %d] Upload attempt %d/%d failed for %s: %v",
 								workerID, i+1, r.uploader.config.RetryCount, segment, err)
@@ -765,6 +765,7 @@ func (r *Recorder) Stop() {
 }
 
 func main() {
+	fmt.Println("Version: 0.1")
 	config, err := loadConfig()
 	if err != nil {
 		fmt.Printf("Error loading config: %v\n", err)
